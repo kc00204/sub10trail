@@ -190,13 +190,16 @@
   if(cfg){
     try{
       const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-      const { getDatabase, ref, onValue, update } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+      const { getDatabase, ref, onValue, update, remove } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
       const app = initializeApp(cfg);
       const db = getDatabase(app);
-      const safe = n => encodeURIComponent(n).replace(/[.#$\[\]/]/g,"_");
+      // Firebase keys allow UTF-8 (incl. Chinese); only forbid . # $ [ ] / and control chars
+      const safe = n => (String(n).replace(/[.#$\[\]\/\x00-\x1F\x7F]/g,"_").slice(0,150) || "_");
       window.__cloud = {
         ready:true,
+        keyOf: safe,
         save(name, data){ return update(ref(db, "runners/"+safe(name)), data); },
+        remove(name){ return remove(ref(db, "runners/"+safe(name))); },
         listen(cb){ onValue(ref(db,"runners"), snap=>cb(snap.val()||{})); }
       };
       document.dispatchEvent(new Event("cloud-ready"));
@@ -283,6 +286,8 @@
 
     <label>想留一句俾隊友（選填）</label>
     <input type="text" id="msg" placeholder="例如：一齊 sub 70！收工去食嘢🍜" autocomplete="off">
+    <button class="btn ghost block" id="btnWithdraw" style="margin-top:14px">🗑️ 撤回我嘅報名（唔去喇）</button>
+    <p class="small" style="margin-top:6px">想改狀態 → 揀「今次唔得」再撳儲存。想連個名都消失 → 撳「撤回我嘅報名」。</p>
   </div>
 
   <!-- ===== ROSTER ===== -->
@@ -422,6 +427,10 @@
   let store=load();
   let me={name:"",status:"",prep:[],goal:"",msg:"",gear:{}};
 
+  // same key rule as cloud: keep readable UTF-8, only replace forbidden chars
+  const safeKey = n => (String(n).replace(/[.#$\[\]\/\x00-\x1F\x7F]/g,"_").slice(0,150) || "_");
+  const dispName = (r,k) => (r&&r.name) ? r.name : k;
+
   function load(){ try{ return JSON.parse(localStorage.getItem(KEY))||{runners:{}}; }catch(e){ return {runners:{}}; } }
   function persist(){ try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} }
   function cloudOn(){ return window.__cloud && window.__cloud.ready; }
@@ -466,15 +475,15 @@
   gearEl.querySelectorAll("li").forEach(li=>{
     li.onclick=()=>{ li.classList.toggle("done"); me.gear[li.dataset.k]=li.classList.contains("done");
       // gear is personal; save quietly to localStorage
-      if(me.name){ store.runners[me.name]=snapshot(); persist(); if(cloudOn()) window.__cloud.save(me.name, snapshot()); }
+      if(me.name){ store.runners[safeKey(me.name)]=snapshot(); persist(); if(cloudOn()) window.__cloud.save(me.name, snapshot()); }
     };
   });
 
-  function snapshot(){ return {status:me.status,prep:[...me.prep],goal:me.goal,msg:me.msg,gear:Object.assign({},me.gear)}; }
+  function snapshot(){ return {name:me.name,status:me.status,prep:[...me.prep],goal:me.goal,msg:me.msg,gear:Object.assign({},me.gear)}; }
 
   // ---- load my saved ----
   function loadMine(name){
-    const p=store.runners[name];
+    const p=store.runners[safeKey(name)];
     me = p ? {name, status:p.status||"", prep:[...(p.prep||[])], goal:p.goal||"", msg:p.msg||"", gear:Object.assign({},p.gear||{})}
            : {name, status:"", prep:[], goal:"", msg:"", gear:{}};
     document.getElementById("goal").value=me.goal;
@@ -495,7 +504,7 @@
     if(!n){ toast("⚠️ 請先填名"); nameEl.focus(); return false; }
     me.name=n;
     const data=snapshot();
-    store.runners[n]=data;
+    store.runners[safeKey(n)]=data;
     persist(); try{ localStorage.setItem(KEY+"-me",n); }catch(e){}
     render();
     if(cloudOn()){ window.__cloud.save(n,data).then(()=>toast("☁️ 已儲存並同步俾隊友！")).catch(()=>toast("💾 已儲存（雲端同步失敗）")); }
@@ -503,6 +512,26 @@
     return true;
   }
   document.getElementById("btnSave").onclick=saveMe;
+
+  // ---- withdraw (完全撤回報名) ----
+  function withdrawMe(){
+    const n=nameEl.value.trim();
+    if(!n){ toast("⚠️ 請先填返你個名"); nameEl.focus(); return; }
+    const k=safeKey(n);
+    if(!store.runners[k]){ toast("🤔 搵唔到你個報名記錄"); return; }
+    if(!confirm("確定撤回「"+n+"」嘅報名？你個名會喺名單度消失。")) return;
+    delete store.runners[k];
+    persist();
+    // reset my form status
+    me.status=""; me.prep=[];
+    document.querySelectorAll("#status button").forEach(b=>b.classList.remove("on"));
+    document.querySelectorAll("#prep button").forEach(b=>b.classList.remove("on"));
+    render();
+    if(cloudOn() && window.__cloud.remove){
+      window.__cloud.remove(n).then(()=>toast("🗑️ 已撤回報名")).catch(()=>toast("🗑️ 已撤回（雲端可能未同步）"));
+    } else { toast("🗑️ 已撤回報名"); }
+  }
+  var _wb=document.getElementById("btnWithdraw"); if(_wb) _wb.onclick=withdrawMe;
 
   // ---- render team + roster ----
   const STLABEL={go:{t:"一定去",c:"go"},maybe:{t:"考慮緊",c:"maybe"},no:{t:"今次唔得",c:"no"}};
@@ -522,13 +551,15 @@
     if(!names.length){ el.innerHTML='<p class="small">仲未有人報到，做第一個啦！</p>'; return; }
     const order={go:0,maybe:1,no:2,"":3};
     names.sort((a,b)=>(order[runners[a].status]??3)-(order[runners[b].status]??3));
+    const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     el.innerHTML=names.map(n=>{
       const r=runners[n]; const st=STLABEL[r.status]||{t:"未定",c:"no"};
-      const prep=(r.prep||[]).map(p=>'<span class="chip prep">'+p+'</span>').join("");
-      const goal=r.goal?' · 🎯'+r.goal:"";
-      const msg=r.msg?'<div class="st">💬 '+r.msg+'</div>':"";
-      return '<div class="runner"><div class="av">'+n.slice(0,1).toUpperCase()+'</div>'+
-        '<div><div class="nm">'+n+'</div><div class="st">'+st.t+goal+'</div>'+msg+'</div>'+
+      const nm=esc(dispName(r,n));
+      const prep=(r.prep||[]).map(p=>'<span class="chip prep">'+esc(p)+'</span>').join("");
+      const goal=r.goal?' · 🎯'+esc(r.goal):"";
+      const msg=r.msg?'<div class="st">💬 '+esc(r.msg)+'</div>':"";
+      return '<div class="runner"><div class="av">'+nm.slice(0,1).toUpperCase()+'</div>'+
+        '<div><div class="nm">'+nm+'</div><div class="st">'+st.t+goal+'</div>'+msg+'</div>'+
         '<div class="tags"><span class="chip '+st.c+'">'+st.t+'</span><br>'+prep+'</div></div>';
     }).join("");
   }
@@ -601,7 +632,8 @@
   // ---- export / import ----
   document.getElementById("btnExport").onclick=()=>{
     if(!saveMe()) return;
-    const payload=JSON.stringify({[me.name]:store.runners[me.name]});
+    const k=safeKey(me.name);
+    const payload=JSON.stringify({[k]:store.runners[k]});
     navigator.clipboard.writeText(payload).then(()=>toast("📤 已複製，send 俾隊長！"),()=>prompt("複製呢段 send 俾隊長：",payload));
   };
   document.getElementById("btnImport").onclick=()=>{
