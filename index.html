@@ -157,11 +157,11 @@
   .footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px}
   .save-bar{position:fixed;left:0;right:0;bottom:0;background:rgba(238,246,255,.95);
     backdrop-filter:blur(8px);border-top:1px solid var(--line);padding:10px 16px;
-    display:flex;gap:10px;max-width:820px;margin:0 auto}
+    display:flex;gap:10px;max-width:820px;margin:0 auto;z-index:1000}
   .save-bar .btn{flex:1}
   .toast{position:fixed;bottom:82px;left:50%;transform:translateX(-50%);background:var(--ink);
     color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;
-    transition:opacity .25s;z-index:50}
+    transition:opacity .25s;z-index:1100}
   .toast.show{opacity:1}
   details summary{cursor:pointer;font-weight:800;font-size:15px;padding:6px 0}
   .small{font-size:12px;color:var(--muted)}
@@ -281,6 +281,10 @@
       <button data-v="夾緊時間">🗓️ 夾緊時間</button>
     </div>
 
+    <label>PSR26 個人組報名編號</label>
+    <input type="text" id="psr" placeholder="例如：PSR26-12345（已報 10K/5K 個人組先有）" autocomplete="off">
+    <p class="small" style="margin:4px 0 0">⚠️ 隊際賽只限已成功報名 10 公里或 5 公里 GO RUN 個人組嘅人。填返你嘅 PSR26 編號，隊長夾隊時要用。</p>
+
     <label>目標完成時間（選填）</label>
     <input type="text" id="goal" placeholder="例如：60 分鐘內 / 輕鬆完成就得" autocomplete="off">
 
@@ -293,8 +297,20 @@
   <!-- ===== ROSTER ===== -->
   <div class="card">
     <h2>👟 隊員名單</h2>
-    <p class="hint">即時更新。撳「儲存」之後大家都會見到你。</p>
+    <p class="hint">即時更新。撳「儲存」之後大家都會見到你。有 PSR26 編號會顯示 🎫。</p>
     <div class="roster" id="roster"><p class="small">仲未有人報到，做第一個啦！</p></div>
+  </div>
+
+  <!-- ===== TEAM RULES ===== -->
+  <div class="card">
+    <h2>📌 隊際賽重要事項</h2>
+    <div class="note" style="line-height:1.7">
+      • 隊伍成員<b>須為已成功報名 10 公里或 5 公里 GO RUN 個人組</b>之參加者。<br>
+      • <b>「參加者 1」將成為隊長</b>，填妥報名表後會收到一封隊際盃報名確認電郵。<br>
+      • 參加者必須<b>依照其個人組嘅起跑時間出發</b>，否則其時間成績（包括隊際盃）將不被計算。<br>
+      • 夾隊時需要每位隊員嘅 <b>PSR26 個人組報名編號</b>（格式 PSR26-XXXXX）。
+    </div>
+    <p class="disc">＊以官方報名網站條款為準。</p>
   </div>
 
   <!-- ===== EVENT DETAIL ===== -->
@@ -425,7 +441,7 @@
   const TARGET=new Date(2026,10,15,6,45,0); // month 0-indexed
 
   let store=load();
-  let me={name:"",status:"",prep:[],goal:"",msg:"",gear:{}};
+  let me={name:"",status:"",prep:[],goal:"",msg:"",psr:"",gear:{}};
 
   // same key rule as cloud: keep readable UTF-8, only replace forbidden chars
   const safeKey = n => (String(n).replace(/[.#$\[\]\/\x00-\x1F\x7F]/g,"_").slice(0,150) || "_");
@@ -469,6 +485,7 @@
 
   document.getElementById("goal").addEventListener("input",e=>me.goal=e.target.value);
   document.getElementById("msg").addEventListener("input",e=>me.msg=e.target.value);
+  document.getElementById("psr").addEventListener("input",e=>me.psr=e.target.value);
 
   // ---- gear checklist ----
   const gearEl=document.getElementById("gear");
@@ -479,15 +496,16 @@
     };
   });
 
-  function snapshot(){ return {name:me.name,status:me.status,prep:[...me.prep],goal:me.goal,msg:me.msg,gear:Object.assign({},me.gear)}; }
+  function snapshot(){ return {name:me.name,status:me.status,prep:[...me.prep],goal:me.goal,msg:me.msg,psr:me.psr,gear:Object.assign({},me.gear)}; }
 
   // ---- load my saved ----
   function loadMine(name){
     const p=store.runners[safeKey(name)];
-    me = p ? {name, status:p.status||"", prep:[...(p.prep||[])], goal:p.goal||"", msg:p.msg||"", gear:Object.assign({},p.gear||{})}
-           : {name, status:"", prep:[], goal:"", msg:"", gear:{}};
+    me = p ? {name, status:p.status||"", prep:[...(p.prep||[])], goal:p.goal||"", msg:p.msg||"", psr:p.psr||"", gear:Object.assign({},p.gear||{})}
+           : {name, status:"", prep:[], goal:"", msg:"", psr:"", gear:{}};
     document.getElementById("goal").value=me.goal;
     document.getElementById("msg").value=me.msg;
+    document.getElementById("psr").value=me.psr;
     document.querySelectorAll("#status button").forEach(b=>b.classList.toggle("on",b.dataset.v===me.status));
     document.querySelectorAll("#prep button").forEach(b=>b.classList.toggle("on",me.prep.includes(b.dataset.v)));
     gearEl.querySelectorAll("li").forEach(li=>li.classList.toggle("done", !!me.gear[li.dataset.k]));
@@ -552,14 +570,18 @@
     const order={go:0,maybe:1,no:2,"":3};
     names.sort((a,b)=>(order[runners[a].status]??3)-(order[runners[b].status]??3));
     const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    let firstGoDone=false;
     el.innerHTML=names.map(n=>{
       const r=runners[n]; const st=STLABEL[r.status]||{t:"未定",c:"no"};
       const nm=esc(dispName(r,n));
+      const isCaptain = r.status==="go" && !firstGoDone; if(isCaptain) firstGoDone=true;
+      const cap = isCaptain ? '<span class="chip" style="background:#fff0d6;color:#c98a00">👑 隊長</span>' : '';
+      const psr = r.psr ? '<span class="chip" style="background:#e7f0ff;color:#0a5cff">🎫 '+esc(r.psr)+'</span>' : (r.status==="go"?'<span class="chip no">🎫 未有編號</span>':'');
       const prep=(r.prep||[]).map(p=>'<span class="chip prep">'+esc(p)+'</span>').join("");
       const goal=r.goal?' · 🎯'+esc(r.goal):"";
       const msg=r.msg?'<div class="st">💬 '+esc(r.msg)+'</div>':"";
       return '<div class="runner"><div class="av">'+nm.slice(0,1).toUpperCase()+'</div>'+
-        '<div><div class="nm">'+nm+'</div><div class="st">'+st.t+goal+'</div>'+msg+'</div>'+
+        '<div><div class="nm">'+nm+' '+cap+'</div><div class="st">'+st.t+goal+'</div>'+psr+msg+'</div>'+
         '<div class="tags"><span class="chip '+st.c+'">'+st.t+'</span><br>'+prep+'</div></div>';
     }).join("");
   }
