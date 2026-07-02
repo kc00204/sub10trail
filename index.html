@@ -290,7 +290,8 @@
 
     <label>想留一句俾隊友（選填）</label>
     <input type="text" id="msg" placeholder="例如：一齊 sub 70！收工去食嘢🍜" autocomplete="off">
-    <button class="btn ghost block" id="btnWithdraw" style="margin-top:14px">🗑️ 撤回我嘅報名（唔去喇）</button>
+    <button class="btn energy block" id="btnSaveTop" style="margin-top:16px;padding:14px;font-size:16px">💾 儲存我的狀態</button>
+    <button class="btn ghost block" id="btnWithdraw" style="margin-top:10px">🗑️ 撤回我嘅報名（唔去喇）</button>
     <p class="small" style="margin-top:6px">想改狀態 → 揀「今次唔得」再撳儲存。想連個名都消失 → 撳「撤回我嘅報名」。</p>
   </div>
 
@@ -392,6 +393,9 @@
       <button class="btn block" id="btnEmail">📧 Email 提醒隊友</button>
     </div>
     <button class="btn ghost block" id="btnIcs">⬇️ 下載 .ics（Apple/Outlook 行事曆）</button>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <p class="hint" style="margin:0 0 8px">改咗上面嘅狀態或資料？記得撳呢度儲存 👇</p>
+    <button class="btn energy block" id="btnSaveBottom" style="padding:14px;font-size:16px">💾 儲存我的狀態</button>
   </div>
 
   <details class="card">
@@ -409,9 +413,6 @@
   <p class="footer">Sub 10 Trail · 湊夠 10 人一齊跑 🏃‍♂️🏃‍♀️ · 免費 · 可 Bookmark 🔖</p>
 </div>
 
-<div class="save-bar">
-  <button class="btn energy" id="btnSave">💾 儲存我嘅狀態</button>
-</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -529,7 +530,7 @@
     else toast("💾 已儲存！");
     return true;
   }
-  document.getElementById("btnSave").onclick=saveMe;
+  ["btnSaveTop","btnSaveBottom","btnSave"].forEach(function(id){ var b=document.getElementById(id); if(b) b.onclick=saveMe; });
 
   // ---- withdraw (完全撤回報名) ----
   function withdrawMe(){
